@@ -1,0 +1,199 @@
+---
+title: "seed"
+author: "jhimy"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+library(tidyverse)
+library(GerminaR)
+```
+
+```{r}
+# 1) URL de exportación como CSV de la primera pestaña (germinacion)
+url_csv <- paste0(
+  "https://docs.google.com/spreadsheets/d/",
+  "1gJStV-KTbuRoKQZAzkvUfGWIYUgOeq3YNi4O-NZk2z8",
+  "/export?format=csv&gid=0"
+)
+```
+
+# ─── 1. Instalar y cargar paquetes ──────────────────────────────────────────────
+
+# GerminaR: índices y gráficas para análisis de germinación
+
+if (!requireNamespace("GerminaR", quietly = TRUE)) { install.packages("GerminaR") }
+
+# tidyverse: lectura, manipulación y graficación de datos
+
+if (!requireNamespace("tidyverse", quietly = TRUE)) { install.packages("tidyverse") }
+
+library(GerminaR) library(tidyverse)
+
+```{r}
+# ─── 1. Instalar y cargar paquetes ──────────────────────────────────────────────
+
+# GerminaR: índices y gráficas para análisis de germinación
+if (!requireNamespace("GerminaR", quietly = TRUE)) {
+  install.packages("GerminaR")
+}
+
+# tidyverse: lectura, manipulación y graficación de datos
+if (!requireNamespace("tidyverse", quietly = TRUE)) {
+  install.packages("tidyverse")
+}
+
+library(GerminaR)
+library(tidyverse)
+
+```
+
+```{r}
+# 1) URL de exportación CSV de la hoja "germinacion"
+url_csv <- paste0(
+  "https://docs.google.com/spreadsheets/d/",
+  "1gJStV-KTbuRoKQZAzkvUfGWIYUgOeq3YNi4O-NZk2z8",
+  "/export?format=csv&gid=0"
+)
+
+# 2) Leer con read_csv (de tidyverse). Los nombres de columnas quedarán:
+#    plots, Tratamiento, seeds, d0, d1, d2, d3, d4
+planilla <- read_csv(url_csv, 
+                     col_types = cols(
+                       plots        = col_character(),
+                       Tratamiento  = col_factor(),
+                       seeds        = col_double(),
+                       d0           = col_double(),
+                       d1           = col_double(),
+                       d2           = col_double(),
+                       d3           = col_double(),
+                       d4           = col_double()
+                     ))
+
+# 3) Mostrar un vistazo
+glimpse(planilla)
+
+```
+
+```{r}
+# 1) Verificar que no haya filas duplicadas o valores extraños
+planilla %>% arrange(plots) %>% slice_head(n = 10)
+
+# 2) Cantidad de réplicas por tratamiento
+planilla %>%
+  count(Tratamiento) %>%
+  rename(n_replicas = n)
+
+# 3) Si deseas tratar los NA en conteo de germinados como cero:
+planilla <- planilla %>%
+  mutate(
+    across(starts_with("d"), ~ replace_na(.x, 0))
+  )
+
+# 4) Verificar de nuevo
+planilla %>% filter(is.na(d4))  # debería quedar vacío si reemplazaste con 0
+
+```
+
+```{r}
+# 1) Mantener únicamente columnas: plots, Tratamiento, seeds, d0, d1, d2, d3, d4
+wide_original <- planilla %>%
+  select(plots, Tratamiento, seeds, d0, d1, d2, d3, d4)
+
+# 2) Crear la matriz de conteos: filas = réplicas, columnas = d0–d4
+matriz_germi <- wide_original %>%
+  select(d0, d1, d2, d3, d4) %>%
+  as.matrix()
+
+# 3) Renombrar columnas de “d0” a “D0”, “d1” a “D1”, …
+colnames(matriz_germi) <- toupper(colnames(matriz_germi))
+
+# 4) Vector de tratamientos (factor)
+grupos <- wide_original$Tratamiento
+
+# 5) Vector de número de semillas sembradas por réplica
+semillas <- wide_original$seeds
+
+# 6) Identificador opcional de réplicas
+plots_id <- wide_original$plots
+
+# 7) Confirmar dimensiones e inspectar primeras filas de la matriz
+dim(matriz_germi)   # debe ser: n_filas × 5 (días 0,1,2,3,4)
+head(matriz_germi)
+
+```
+
+```{r}
+# 1) Prefijos de columnas (días) para pasar a GerminaR
+prefijos <- colnames(matriz_germi)  # c("D0","D1","D2","D3","D4")
+
+# 2) PGF: porcentaje final de germinación (manual)
+#    = (suma de germinados totales en todos los días / semillas) * 100
+PGF <- rowSums(matriz_germi, na.rm = TRUE) / semillas * 100
+
+# 3) MGT: Tiempo Medio de Germinación
+MGT <- ger_MGT(
+  data     = as.data.frame(matriz_germi),
+  SeedN    = semillas,
+  evalName = prefijos
+)
+
+# 4) GSP: Velocidad Simple de Germinación
+GSP <- ger_GSP(
+  data     = as.data.frame(matriz_germi),
+  SeedN    = semillas,
+  evalName = prefijos
+)
+
+# 5) CVG: Coeficiente de Variación de Germinación
+CVG <- ger_CVG(
+  data     = as.data.frame(matriz_germi),
+  SeedN    = semillas,
+  evalName = prefijos
+)
+
+# 6) SYN: Índice de Sincronización
+SYN <- ger_SYN(
+  data     = as.data.frame(matriz_germi),
+  SeedN    = semillas,
+  evalName = prefijos
+)
+
+# 7) Conformar un tibble con todos los índices por réplica
+indices_por_repl <- tibble(
+  plots       = plots_id,
+  Tratamiento = grupos,
+  Semillas    = semillas,
+  PGF         = PGF,
+  MGT         = MGT,
+  GSP         = GSP,
+  CVG         = CVG,
+  SYN         = SYN
+)
+
+# 8) Inspeccionar resultado
+indices_por_repl %>% arrange(Tratamiento) %>% slice_head(n = 10)
+
+```
