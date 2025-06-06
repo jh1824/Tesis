@@ -1,199 +1,253 @@
 ---
-title: "seed"
-author: "jhimy"
+title: "germina r"
+author: "Grupo semillas"
 format: html
 editor: visual
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
 ```{r}
-1 + 1
-```
-
-You can add options to executable code like this
-
-```{r}
-#| echo: false
-2 * 2
-```
-
-The `echo: false` option disables the printing of code (only output is displayed).
-
-```{r}
+# ------------------------
+# 1. CONFIGURACIÓN GENERAL
+# ------------------------
+# Cargamos setup de Inkaverse y librerías necesarias
+source("https://inkaverse.com/setup.r")
 library(tidyverse)
 library(GerminaR)
-```
-
-```{r}
-# 1) URL de exportación como CSV de la primera pestaña (germinacion)
-url_csv <- paste0(
-  "https://docs.google.com/spreadsheets/d/",
-  "1gJStV-KTbuRoKQZAzkvUfGWIYUgOeq3YNi4O-NZk2z8",
-  "/export?format=csv&gid=0"
-)
-```
-
-# ─── 1. Instalar y cargar paquetes ──────────────────────────────────────────────
-
-# GerminaR: índices y gráficas para análisis de germinación
-
-if (!requireNamespace("GerminaR", quietly = TRUE)) { install.packages("GerminaR") }
-
-# tidyverse: lectura, manipulación y graficación de datos
-
-if (!requireNamespace("tidyverse", quietly = TRUE)) { install.packages("tidyverse") }
-
-library(GerminaR) library(tidyverse)
-
-```{r}
-# ─── 1. Instalar y cargar paquetes ──────────────────────────────────────────────
-
-# GerminaR: índices y gráficas para análisis de germinación
-if (!requireNamespace("GerminaR", quietly = TRUE)) {
-  install.packages("GerminaR")
-}
-
-# tidyverse: lectura, manipulación y graficación de datos
-if (!requireNamespace("tidyverse", quietly = TRUE)) {
-  install.packages("tidyverse")
-}
-
-library(GerminaR)
-library(tidyverse)
+library(cowplot)
 
 ```
 
 ```{r}
-# 1) URL de exportación CSV de la hoja "germinacion"
-url_csv <- paste0(
-  "https://docs.google.com/spreadsheets/d/",
-  "1gJStV-KTbuRoKQZAzkvUfGWIYUgOeq3YNi4O-NZk2z8",
-  "/export?format=csv&gid=0"
-)
+# -----------------------------------
+# 2. IMPORTAR Y PREPARAR LOS DATOS
+# -----------------------------------
+# URL de tu Google Sheet
+url <- "https://docs.google.com/spreadsheets/d/16eZ0pfgKOVMiMsAfz5IzCG9rTSpA0nHeiMpe4MsDcMM/edit?gid=0"
+gs  <- as_sheets_id(url)
 
-# 2) Leer con read_csv (de tidyverse). Los nombres de columnas quedarán:
-#    plots, Tratamiento, seeds, d0, d1, d2, d3, d4
-planilla <- read_csv(url_csv, 
-                     col_types = cols(
-                       plots        = col_character(),
-                       Tratamiento  = col_factor(),
-                       seeds        = col_double(),
-                       d0           = col_double(),
-                       d1           = col_double(),
-                       d2           = col_double(),
-                       d3           = col_double(),
-                       d4           = col_double()
-                     ))
-
-# 3) Mostrar un vistazo
-glimpse(planilla)
-
-```
-
-```{r}
-# 1) Verificar que no haya filas duplicadas o valores extraños
-planilla %>% arrange(plots) %>% slice_head(n = 10)
-
-# 2) Cantidad de réplicas por tratamiento
-planilla %>%
-  count(Tratamiento) %>%
-  rename(n_replicas = n)
-
-# 3) Si deseas tratar los NA en conteo de germinados como cero:
-planilla <- planilla %>%
+# Leemos la pestaña "germination"
+fb <- gs %>% 
+  range_read("germination") %>% 
+  # Convertimos columnas a los tipos adecuados
   mutate(
-    across(starts_with("d"), ~ replace_na(.x, 0))
+    # plots a factor
+    plots = as.factor(plots),
+    # seeds a numérico
+    seeds = as.numeric(seeds),
+    # d0–d5 a numérico, quitando paréntesis si existieran
+    d0 = as.numeric(str_remove_all(as.character(d0), "[()]")),
+    d1 = as.numeric(str_remove_all(as.character(d1), "[()]")),
+    d2 = as.numeric(str_remove_all(as.character(d2), "[()]")),
+    d3 = as.numeric(str_remove_all(as.character(d3), "[()]")),
+    d4 = as.numeric(str_remove_all(as.character(d4), "[()]")),
+    d5 = as.numeric(str_remove_all(as.character(d5), "[()]"))
+  ) %>% 
+  as.data.frame()
+
+# Creamos un vector nombrado que asocia cada 'plots' con su tratamiento
+treatment_map <- c(
+  "116" = "Lija",        "118" = "Lija",        "122" = "Lija",        "109" = "Lija",        "110" = "Lija",
+  "106" = "Acetona",     "105" = "Acetona",     "117" = "Acetona",     "112" = "Acetona",     "113" = "Acetona",
+  "114" = "Control",     "119" = "Control",     "124" = "Control",     "102" = "Control",     "115" = "Control",
+  "101" = "Agua caliente","103" = "Agua caliente","120" = "Agua caliente","121" = "Agua caliente","123" = "Agua caliente"
+)
+
+# Añadimos la columna Tratamiento usando el mapa anterior
+fb <- fb %>% 
+  mutate(
+    Tratamiento = factor(
+      treatment_map[ as.character(plots) ],
+      levels = c("Lija", "Acetona", "Control", "Agua caliente")
+    )
   )
 
-# 4) Verificar de nuevo
-planilla %>% filter(is.na(d4))  # debería quedar vacío si reemplazaste con 0
+# Verificamos que los tipos queden correctos
+str(fb)
 
 ```
 
 ```{r}
-# 1) Mantener únicamente columnas: plots, Tratamiento, seeds, d0, d1, d2, d3, d4
-wide_original <- planilla %>%
-  select(plots, Tratamiento, seeds, d0, d1, d2, d3, d4)
+# ----------------------------------------------------------
+# 3. ÍNDICE DE GERMINACIÓN (Germination Index) – versión kableExtra
+# ----------------------------------------------------------
+library(kableExtra)
 
-# 2) Crear la matriz de conteos: filas = réplicas, columnas = d0–d4
-matriz_germi <- wide_original %>%
-  select(d0, d1, d2, d3, d4) %>%
-  as.matrix()
+gsm <- ger_summary(
+  SeedN    = "seeds",      # columna con número de semillas sembradas
+  evalName = "d",          # tomará d0–d5
+  data     = fb
+)
 
-# 3) Renombrar columnas de “d0” a “D0”, “d1” a “D1”, …
-colnames(matriz_germi) <- toupper(colnames(matriz_germi))
+gsm %>%
+  kable(
+    format    = "html", 
+    caption   = "Resumen de índice de germinación (d0–d5)",
+    digits    = 2,           # redondear a 2 decimales
+    booktabs  = TRUE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width        = FALSE,
+    position          = "left"
+  ) %>%
+  scroll_box(
+    width  = "100%",   # ancho máximo de la caja
+    height = "400px"   # altura fija con scroll vertical
+  )
 
-# 4) Vector de tratamientos (factor)
-grupos <- wide_original$Tratamiento
-
-# 5) Vector de número de semillas sembradas por réplica
-semillas <- wide_original$seeds
-
-# 6) Identificador opcional de réplicas
-plots_id <- wide_original$plots
-
-# 7) Confirmar dimensiones e inspectar primeras filas de la matriz
-dim(matriz_germi)   # debe ser: n_filas × 5 (días 0,1,2,3,4)
-head(matriz_germi)
 
 ```
 
 ```{r}
-# 1) Prefijos de columnas (días) para pasar a GerminaR
-prefijos <- colnames(matriz_germi)  # c("D0","D1","D2","D3","D4")
+# -------------------------------------------------------
+# 4. TIEMPO MEDIO DE GERMINACIÓN (Mean Germination Time)
+# -------------------------------------------------------
+# Análisis de varianza: mgt ~ Tratamiento
+av <- aov(mgt ~ Tratamiento, data = gsm)
+anova(av)
 
-# 2) PGF: porcentaje final de germinación (manual)
-#    = (suma de germinados totales en todos los días / semillas) * 100
-PGF <- rowSums(matriz_germi, na.rm = TRUE) / semillas * 100
+```
 
-# 3) MGT: Tiempo Medio de Germinación
-MGT <- ger_MGT(
-  data     = as.data.frame(matriz_germi),
-  SeedN    = semillas,
-  evalName = prefijos
+```{r}
+# ------------------------------------
+# 4.1 Comparación de medias (SNK test) – versión kableExtra
+# ------------------------------------
+library(kableExtra)
+
+mc_mgt <- ger_testcomp(
+  aov  = av,
+  comp = "Tratamiento",
+  type = "snk"
 )
 
-# 4) GSP: Velocidad Simple de Germinación
-GSP <- ger_GSP(
-  data     = as.data.frame(matriz_germi),
-  SeedN    = semillas,
-  evalName = prefijos
+# Tomamos mc_mgt$table y usamos kableExtra para formatearla
+mc_mgt$table %>%
+  kable(
+    format    = "html",
+    caption   = "Comparación de tiempo medio de germinación (SNK)",
+    digits    = 2,
+    booktabs  = TRUE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width        = FALSE,
+    position          = "left"
+  ) %>%
+  scroll_box(
+    width  = "100%",
+    height = "300px"
+  )
+
+
+```
+
+```{r}
+# ------------------------------------------------------
+# 4.2 Gráfica de barras: Tiempo medio de germinación
+# ------------------------------------------------------
+plot_mgt <- mc_mgt$table %>% 
+  plot_smr(
+    data    = .,
+    type    = "bar",
+    x       = "Tratamiento",
+    y       = "mgt",
+    ylimits = c(0, 4, 0.5),
+    ylab    = "Tiempo medio de germinación (días)",
+    xlab    = "Tratamiento",
+    glab    = "Letras SNK",
+    sig     = "sig",
+    error   = "ste",
+    color   = TRUE
+  )
+
+# Mostramos la gráfica
+plot_mgt
+
+```
+
+```{r}
+# ---------------------------------------------------
+# 5. GERMINACIÓN A LO LARGO DEL TIEMPO (Cumulated %)
+# ---------------------------------------------------
+git <- ger_intime(
+  Factor    = "Tratamiento",
+  SeedN     = "seeds",
+  evalName  = "d",       # detecta d0–d5
+  method    = "percentage",
+  data      = fb
 )
 
-# 5) CVG: Coeficiente de Variación de Germinación
-CVG <- ger_CVG(
-  data     = as.data.frame(matriz_germi),
-  SeedN    = semillas,
-  evalName = prefijos
-)
+# Mostramos la tabla de porcentaje acumulado
+git %>% 
+  kable(caption = "Germinación acumulada (%) por tratamiento (d0–d5)")
 
-# 6) SYN: Índice de Sincronización
-SYN <- ger_SYN(
-  data     = as.data.frame(matriz_germi),
-  SeedN    = semillas,
-  evalName = prefijos
-)
+```
 
-# 7) Conformar un tibble con todos los índices por réplica
-indices_por_repl <- tibble(
-  plots       = plots_id,
-  Tratamiento = grupos,
-  Semillas    = semillas,
-  PGF         = PGF,
-  MGT         = MGT,
-  GSP         = GSP,
-  CVG         = CVG,
-  SYN         = SYN
-)
+```{r}
+# ----------------------------------------------------
+# 5.1 Gráfica de línea: Germinación acumulada en el tiempo
+# ----------------------------------------------------
+plot_git <- git %>% 
+  fplot(
+    data    = .,
+    type    = "line",
+    x       = "evaluation",
+    y       = "mean",
+    group   = "Tratamiento",
+    ylimits = c(0, 110, 10),
+    ylab    = expression(paste("Germinación (", "%", ")")),  # Usamos paste() para colocar un %
+    xlab    = "Días (0-5)",
+    color   = TRUE,
+    error   = "ste"
+  )
 
-# 8) Inspeccionar resultado
-indices_por_repl %>% arrange(Tratamiento) %>% slice_head(n = 10)
+# Mostramos la gráfica corregida
+plot_git
+
+
+
+```
+
+```{r}
+# ---------------------------------------------------
+# 6. DIAGNÓSTICOS ADICIONALES DEL SNK (ejes mejorados)
+# ---------------------------------------------------
+# Vamos a ajustar las escalas de los ejes para evitar ver números extremadamente grandes.
+# Usaremos la función scales::comma_format() para formatear los labels en miles (con comas).
+#
+# 1. Cargamos la librería scales (si no la tienes, instálala con install.packages("scales")).
+# 2. Tomamos cada uno de los ggplot almacenados en mc_mgt$diagplot y le añadimos:
+#    - scale_y_continuous(labels = comma_format())
+#    - scale_x_continuous(labels = comma_format())
+#    - un theme con texto más pequeño para que quepan bien los números.
+# 3. Luego, combinamos esas versiones ajustadas con plot_grid().
+
+library(scales)
+
+suppressWarnings({
+  diag_plots_original <- mc_mgt$diagplot
+  
+  diag_plots_ajustados <- lapply(diag_plots_original, function(p) {
+    p +
+      # Formateamos los ejes X e Y con comas en miles
+      scale_y_continuous(labels = comma_format()) +
+      scale_x_continuous(labels = comma_format()) +
+      # Ajustamos el tema para que el texto de ejes sea más pequeño y legible
+      theme_minimal() +
+      theme(
+        axis.text  = element_text(size =  9),
+        axis.title = element_text(size = 10),
+        plot.title = element_text(size = 11, face = "bold")
+      )
+  })
+  
+  # Finalmente combinamos los gráficos ajustados
+  plot_grid(
+    plotlist = diag_plots_ajustados,
+    ncol     = 2,
+    labels   = "auto"
+  )
+})
+
 
 ```
